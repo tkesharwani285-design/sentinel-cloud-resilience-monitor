@@ -3,6 +3,7 @@
 A multi-cloud failover monitor. It health-checks two cloud providers every second, automatically reroutes traffic when one fails, and shows uptime, latency, failover events and state-sync status on a live dashboard.
 
 ![Sentinel dashboard](docs/dashboard.png)
+![CI](https://github.com/tkesharwani285-design/sentinel-cloud-resilience-monitor/actions/workflows/ci.yml/badge.svg)
 
 ## Features
 - **Two modes:** Simulation (two mock cloud providers) and Live (real HTTPS probes to AWS and Google Cloud)
@@ -12,6 +13,9 @@ A multi-cloud failover monitor. It health-checks two cloud providers every secon
 - **Latency spike injection** in Simulation mode
 - **State-sync tracking** that shows a provider catching up after recovery (simulated)
 - **React dashboard** with a live traffic-path diagram, uptime and request success rate
+- **Measured failover and detection times (MTTD)** from kill-switch tests
+- **CSV export** of events and history
+- **Automated tests** and GitHub Actions CI
 
 ## Architecture
 ```mermaid
@@ -47,6 +51,10 @@ Then open http://localhost:8080
 - **Sentinel:** checks each provider every second, records uptime, latency and events in Redis, and exposes a control API.
 - **Nginx:** routes traffic to Provider A and falls back to Provider B when A returns errors or times out.
 - **Dashboard:** a React page that polls the Sentinel API once per second.
+
+## Measured results
+Over 5 kill-switch tests: average failover time X s, average failure-detection time X s.
+Health checks run once per second, so timings have about 1 s resolution.
 
 ## Roadmap
 - Persistent history and uptime-over-time charts
