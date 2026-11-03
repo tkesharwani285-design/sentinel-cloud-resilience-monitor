@@ -1,7 +1,7 @@
 """Sentinel: health-checks both providers, tracks failovers, simulated state sync, control API."""
-import os, time, json, socket, ssl, threading, requests, redis
+import os, time, json, csv, io, socket, ssl, threading, requests, redis
 from urllib.parse import urlparse
-from flask import Flask, jsonify
+from flask import Flask, Response, jsonify, request
 
 R = redis.Redis(host=os.environ.get("REDIS_HOST", "redis"), decode_responses=True)
 P = {"a": {"url": "http://provider_a:5001", "label": "Nimbus Cloud", "region": "Mumbai"},
@@ -38,9 +38,20 @@ def probe(url):
     return {k: round(v) if isinstance(v, float) else v for k, v in d.items()}
 app = Flask(__name__)
 
+WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL", "")
+ICON = {"bad": "\U0001F534", "warn": "\U0001F7E0", "ok": "\U0001F7E2"}
+
+def alert(kind, msg):
+    try:
+        requests.post(WEBHOOK, json={"content": f"{ICON[kind]} **Sentinel:** {msg}"}, timeout=3)
+    except requests.RequestException:
+        pass
+
 def event(kind, msg):
     R.lpush("events", json.dumps({"t": time.time(), "kind": kind, "msg": msg}))
-    R.ltrim("events", 0, 39)
+    R.ltrim("events", 0, 199)
+    if WEBHOOK and kind in ICON:
+        threading.Thread(target=alert, args=(kind, msg), daemon=True).start()
 
 def check(k):
     p, t = info(k), time.time()
@@ -63,12 +74,57 @@ def check(k):
     if was is not None and was != str(int(ok)):
         if ok:
             dur = time.time() - float(R.get(f"down:{k}") or time.time())
-            R.delete(f"down:{k}")
+            R.delete(f"down:{k}"); R.delete(f"killed_at:{k}")
+            R.lpush("mttr", round(dur * 1000)); R.ltrim("mttr", 0, 49)
             event("ok", f"{p['label']} recovered after {dur:.1f}s")
         else:
             R.set(f"down:{k}", time.time())
+            ka = R.get(f"killed_at:{k}")
+            if ka:
+                R.lpush("mttd", round((time.time() - float(ka)) * 1000)); R.ltrim("mttd", 0, 49)
             event("bad", f"{p['label']} failed its health check")
+    record(k, ok, ms)
     return ok
+
+RANGES = {"1h": (60, 1), "24h": (1440, 15), "7d": (10080, 120)}  # (minutes covered, bucket size in minutes)
+
+def record(k, ok, ms):
+    """Per-minute counters kept for 7 days (persisted by Redis AOF)."""
+    m = int(time.time() // 60)
+    R.hincrby(f"h:{k}:n", m, 1)
+    if ok:
+        R.hincrby(f"h:{k}:ok", m, 1); R.hincrby(f"h:{k}:lat", m, max(ms, 0))
+    if m % 60 == 0 and R.set(f"pruned:{k}:{m}", 1, nx=True, ex=7200):
+        for suf in ("n", "ok", "lat"):
+            for f in R.hkeys(f"h:{k}:{suf}"):
+                if int(f) < m - 10080: R.hdel(f"h:{k}:{suf}", f)
+
+def history(rng):
+    span, step = RANGES.get(rng, RANGES["1h"])
+    now = int(time.time() // 60); start = (now - span) // step * step
+    out = {}
+    for k in P:
+        n, ok, lat = (R.hgetall(f"h:{k}:{x}") for x in ("n", "ok", "lat"))
+        b = {}
+        for f, v in n.items():
+            m = int(f)
+            if m < start: continue
+            c = b.setdefault(m // step * step, [0, 0, 0])
+            c[0] += int(v); c[1] += int(ok.get(f, 0)); c[2] += int(lat.get(f, 0))
+        out[k] = [{"t": t * 60, "uptime": round(100 * c[1] / c[0], 2), "latency": round(c[2] / c[1]) if c[1] else None}
+                  for t, c in sorted(b.items())]
+    return out
+
+def stat(key):
+    v = [int(x) for x in R.lrange(key, 0, 49)]
+    return {"last": v[0], "avg": round(sum(v) / len(v)), "n": len(v)} if v else None
+
+def csv_response(name, header, rows):
+    buf = io.StringIO(); w = csv.writer(buf); w.writerow(header); w.writerows(rows)
+    return Response(buf.getvalue(), mimetype="text/csv", headers={"Content-Disposition": f"attachment; filename={name}"})
+
+def iso(t):
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
 
 def route(up):
     active = "a" if up["a"] else "b" if up["b"] else "none"
@@ -77,6 +133,9 @@ def route(up):
         R.set("active", active)
         if prev:
             R.incr("failovers")
+            ka = R.get(f"killed_at:{prev}")
+            if ka and active != "none":   # failover time = kill pressed -> traffic rerouted
+                R.lpush("failover_ms", round((time.time() - float(ka)) * 1000)); R.ltrim("failover_ms", 0, 49)
             if active == "none": event("bad", "Total outage: both providers are down")
             elif active == "b": event("warn", f"Failover: traffic moved to {info('b')['label']}")
             else: event("ok", f"Failback: traffic returned to {info('a')['label']}")
@@ -129,6 +188,7 @@ def status():
                   "hist": [int(v) for v in reversed(R.lrange(f"hist:{k}", 0, 59))]}
     req, fail = int(R.get("req") or 0), int(R.get("fail") or 0)
     return jsonify({"mode": mode(), "active": R.get("active") or "a", "providers": out, "seq": seq,
+                    "metrics": {x: stat(x) for x in ("failover_ms", "mttd", "mttr")},
                     "req": req, "fail": fail, "failovers": int(R.get("failovers") or 0),
                     "success": round(100 * (req - fail) / req, 2) if req else 100,
                     "events": [json.loads(e) for e in R.lrange("events", 0, 14)]})
@@ -138,7 +198,7 @@ def control(action, k):
     if k not in P: return jsonify(error="unknown provider"), 404
     name = info(k)["label"]
     if action == "kill":
-        R.set(f"{k}:killed", 1); event("bad", f"Kill switch pressed on {name}")
+        R.set(f"{k}:killed", 1); R.set(f"killed_at:{k}", time.time()); event("bad", f"Kill switch pressed on {name}")
     elif action == "revive":
         R.delete(f"{k}:killed"); event("info", f"{name} restart requested")
     elif action == "spike":
@@ -146,6 +206,20 @@ def control(action, k):
         else: R.set(f"{k}:spike", SPIKE_MS); event("warn", f"Latency spike injected on {name} (+{SPIKE_MS} ms)")
     else: return jsonify(error="unknown action"), 404
     return jsonify(ok=True)
+
+@app.route("/api/history")
+def history_api():
+    return jsonify(history(request.args.get("range", "1h")))
+
+@app.route("/api/export/events.csv")
+def export_events():
+    rows = [(iso(e["t"]), e["kind"], e["msg"]) for e in map(json.loads, R.lrange("events", 0, -1))]
+    return csv_response("sentinel_events.csv", ["time_utc", "level", "message"], rows)
+
+@app.route("/api/export/history.csv")
+def export_history():
+    rows = [(iso(r["t"]), info(k)["label"], r["uptime"], r["latency"]) for k, pts in history("24h").items() for r in pts]
+    return csv_response("sentinel_history.csv", ["time_utc", "provider", "uptime_pct", "avg_latency_ms"], rows)
 
 @app.route("/api/mode/<m>", methods=["POST"])
 def set_mode(m):
@@ -158,5 +232,6 @@ def set_mode(m):
 def reset():
     m = mode(); R.flushdb(); R.set("mode", m); event("info", "Metrics reset"); return jsonify(ok=True)
 
-threading.Thread(target=loop, daemon=True).start()
-app.run(host="0.0.0.0", port=8000)
+if __name__ == "__main__":
+    threading.Thread(target=loop, daemon=True).start()
+    app.run(host="0.0.0.0", port=8000)

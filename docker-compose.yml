@@ -1,19 +1,23 @@
 services:
   redis:
     image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes: [redisdata:/data]
   provider_a:
     build: ./services
     command: python provider.py
-    environment: {NAME: a, PORT: "5001", BASE_MS: "35"}
+    environment: { NAME: a, PORT: "5001", BASE_MS: "35" }
     depends_on: [redis]
   provider_b:
     build: ./services
     command: python provider.py
-    environment: {NAME: b, PORT: "5002", BASE_MS: "70"}
+    environment: { NAME: b, PORT: "5002", BASE_MS: "70" }
     depends_on: [redis]
   sentinel:
     build: ./services
     command: python sentinel.py
+    environment:
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
     depends_on: [redis, provider_a, provider_b]
   gateway:
     image: nginx:1.27-alpine
@@ -22,3 +26,6 @@ services:
       - ./dashboard:/usr/share/nginx/html:ro
     ports: ["8080:80"]
     depends_on: [sentinel, provider_a, provider_b]
+
+volumes:
+  redisdata:

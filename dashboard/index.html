@@ -49,7 +49,11 @@ button.kill{background:var(--bad);border-color:var(--bad);color:#fff}button.kill
 .empty{color:var(--mute)}
 .probe{display:flex;gap:14px;flex-wrap:wrap;margin:-4px 0 14px;color:var(--mute);font-size:.8rem}.probe b{color:var(--text)}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:12px}.seg button{border:0;border-radius:0;background:transparent}.seg button.on{background:var(--text);color:var(--ink)}
-@media(max-width:980px){.stats{grid-template-columns:1fr 1fr}.grid,.provs{grid-template-columns:1fr}}
+.m3{grid-template-columns:repeat(3,1fr)}.hh{display:flex;justify-content:space-between;align-items:center}.hh .seg{margin:0 0 14px}
+.strip{display:grid;grid-template-columns:70px 1fr;align-items:center;gap:10px;margin:8px 0}.strip div{display:flex;gap:2px;height:26px}.strip i{flex:1;border-radius:2px;min-width:2px}
+.lnk{font:700 .85rem "JetBrains Mono";border-radius:10px;padding:10px 14px;border:1px solid var(--line);background:#0b1022;color:var(--text);text-decoration:none}.lnk:hover{border-color:var(--text)}
+.sec{margin-bottom:18px}
+@media(max-width:980px){.stats{grid-template-columns:1fr 1fr}.grid,.provs{grid-template-columns:1fr}.m3{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){.flow,.dot{animation:none}}
 </style>
 </head>
@@ -111,6 +115,30 @@ function Provider({k,p,active,live}){
   </section>;
 }
 
+function Metrics({m}){
+  const f=v=>v?(v.last/1000).toFixed(1)+" s":"—";
+  const items=[["Failover time",m.failover_ms,"Kill pressed to traffic rerouted"],["Detection time (MTTD)",m.mttd,"Kill pressed to failure detected"],["Recovery time (MTTR)",m.mttr,"Failure detected to healthy again"]];
+  return <div className="stats m3">{items.map(([t,v,d])=><div key={t} className="panel stat"><div className="big">{f(v)}</div><span>{t}</span><br/><span>{v?"average "+(v.avg/1000).toFixed(1)+" s over "+v.n+" test"+(v.n>1?"s":""):d}</span></div>)}</div>;
+}
+
+function History(){
+  const [r,setR]=useState("1h"),[h,setH]=useState(null);
+  useEffect(()=>{const go=()=>fetch("/api/history?range="+r).then(x=>x.json()).then(setH).catch(()=>{});go();const t=setInterval(go,5000);return()=>clearInterval(t)},[r]);
+  const col=u=>u>=99.9?"#3ddba4":u>=95?"#ffc552":"#ff4d5e";
+  const maxL=h?Math.max(100,...["a","b"].flatMap(k=>h[k].map(p=>p.latency||0))):100;
+  const pts=k=>{const d=h[k].filter(p=>p.latency!=null);return d.map((p,i)=>(d.length<2?0:i*600/(d.length-1))+","+(112-(p.latency/maxL)*104)).join(" ")};
+  return <section className="panel sec"><div className="hh"><h2>History: uptime and latency</h2>
+    <div className="seg" role="group" aria-label="Time range">{["1h","24h","7d"].map(v=><button key={v} className={r===v?"on":""} onClick={()=>setR(v)}>{v}</button>)}</div></div>
+    {!h?<p className="empty">Loading…</p>:h.a.length===0?<p className="empty">Collecting data. Bars appear after a minute.</p>:<>
+      {["a","b"].map(k=><div key={k} className="strip"><span style={{color:COLOR[k]}}>{k==="a"?"Primary":"Standby"}</span>
+        <div>{h[k].map((p,i)=><i key={i} title={new Date(p.t*1000).toLocaleString()+": "+p.uptime+"% up, "+(p.latency??"—")+" ms"} style={{background:col(p.uptime)}}/>)}</div></div>)}
+      <svg viewBox="0 0 600 120" width="100%" role="img" aria-label="Average latency over time"><line x1="0" y1="112" x2="600" y2="112" stroke="#26335a"/>
+        <polyline points={pts("a")} fill="none" stroke={COLOR.a} strokeWidth="2"/><polyline points={pts("b")} fill="none" stroke={COLOR.b} strokeWidth="2"/>
+        <text x="4" y="12" fill="#8d9bc4" fontSize="10">{maxL} ms</text></svg>
+      <p className="empty" style={{fontSize:".78rem",margin:"6px 0 0"}}>Bars: green 99.9%+ up, amber 95%+, red below. Lines: average latency (blue primary, pink standby).</p></>}
+  </section>;
+}
+
 function App(){
   const [s,setS]=useState(null),[err,setErr]=useState(false);
   useEffect(()=>{const t=setInterval(()=>fetch("/api/status").then(r=>r.json()).then(d=>{setS(d);setErr(false)}).catch(()=>setErr(true)),1000);return()=>clearInterval(t)},[]);
@@ -138,7 +166,8 @@ function App(){
       </div></section>
     </div>
     <div className="provs"><Provider k="a" p={a} active={s.active} live={s.mode==="live"}/><Provider k="b" p={b} active={s.active} live={s.mode==="live"}/></div>
-    <div className="btns"><button onClick={()=>post("reset/x")}>Reset metrics</button></div>
+    <Metrics m={s.metrics}/><History/>
+    <div className="btns"><a className="lnk" href="/api/export/events.csv" download>Export events (CSV)</a><a className="lnk" href="/api/export/history.csv" download>Export 24h history (CSV)</a><button onClick={()=>post("reset/x")}>Reset metrics</button></div>
   </div>;
 }
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
