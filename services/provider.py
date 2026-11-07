@@ -1,17 +1,26 @@
 """A mock cloud provider. Latency and outages are controlled through Redis flags."""
-import os, time, random, redis
+import os, time, random, threading, redis
 from flask import Flask, jsonify
 
 NAME, PORT = os.environ["NAME"], int(os.environ["PORT"])
 BASE = int(os.environ.get("BASE_MS", "40"))
-r = redis.Redis(host=os.environ.get("REDIS_HOST", "redis"), decode_responses=True)
+r = redis.Redis(host=os.environ.get("REDIS_HOST", "redis"), decode_responses=True,
+                socket_connect_timeout=0.2, socket_timeout=0.2)
 app = Flask(__name__)
+last = (False, 0)   # last known (killed, spike_ms). Requests never wait on Redis.
+
+def poll():
+    """Refresh flags in the background; keep the last known values if Redis is unreachable."""
+    global last
+    while True:
+        try:
+            last = (r.get(f"{NAME}:killed") == "1", int(r.get(f"{NAME}:spike") or 0))
+        except redis.RedisError:
+            pass
+        time.sleep(0.2)
 
 def flags():
-    try:
-        return r.get(f"{NAME}:killed") == "1", int(r.get(f"{NAME}:spike") or 0)
-    except redis.RedisError:
-        return False, 0
+    return last
 
 def reply(body):
     resp = jsonify(body)
@@ -34,4 +43,5 @@ def work():
     time.sleep(max(0, BASE + random.gauss(0, BASE * 0.2) + spike) / 1000)
     return reply({"provider": NAME, "ok": True})
 
+threading.Thread(target=poll, daemon=True).start()
 app.run(host="0.0.0.0", port=PORT, threaded=True)
