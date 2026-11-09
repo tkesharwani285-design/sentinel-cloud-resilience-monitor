@@ -94,13 +94,14 @@ When you press **Kill**:
 5. After **Restart**, the next check succeeds, traffic fails back, and the provider catches up on writes.
 
 ## Measured results
+
 Simulation mode, scripted kill-switch tests (kill the primary, wait 6 s, restart it, wait 10 s), 17 runs after resetting metrics:
 
-| Metric | Result |
-|---|---|
-| Average failover time | **0.9 s** |
-| Average failure-detection time (MTTD) | **0.8 s** |
-| Request success rate | **100%** (1,062 test requests across 32 failover and failback events) |
+| Metric                                | Result                                                                |
+| ------------------------------------- | --------------------------------------------------------------------- |
+| Average failover time                 | **0.9 s**                                                             |
+| Average failure-detection time (MTTD) | **0.8 s**                                                             |
+| Request success rate                  | **100%** (1,062 test requests across 32 failover and failback events) |
 
 - **What "failover time" means:** the time from pressing Kill to Sentinel switching its routing decision. It is not user-visible downtime, because Nginx retries failed requests on the backup immediately.
 - Health checks run once per second and providers refresh the kill flag every 0.2 s, so timings have about 1 s resolution. Before the Redis-outage fix the average was 0.6 s over 28 tests; the fix adds up to 0.2 s.
@@ -129,7 +130,7 @@ The cause was that each provider read Redis on every request with no timeout. Pr
 
 ## Tests and CI
 
-Seven pytest tests (failover and failback, total outage, failover timing, state sync, history maths, status API, CSV export) run on every push with GitHub Actions. They use a fake Redis, so they check routing logic but do not kill a real container behind Nginx. The Redis-outage behaviour above was verified manually and is not yet covered by an automated test.
+Twelve pytest tests run on every push with GitHub Actions. Seven cover the Sentinel routing logic (failover and failback, total outage, failover timing, state sync, history maths, status API, CSV export). Five (`tests/test_provider.py`) cover the Redis-outage behaviour: flags are cached, requests are served in under 0.5 s with Redis down, and a killed provider stays killed. They use a fake Redis, so they check logic but do not kill a real container behind Nginx.
 
 Run locally:
 
@@ -165,7 +166,7 @@ pytest -q
 
 ## Roadmap
 
-- Automated test for the Redis-down behaviour and an end-to-end failover test through Nginx
+- End-to-end failover test through Nginx
 - Per-request tracing to separate in-flight failures from switchover failures
 - Measure recovery time from restart to healthy instead of from the Restart click
 - Prometheus and Grafana metrics
