@@ -63,3 +63,13 @@ def test_provider_picks_up_new_flags_after_redis_returns(monkeypatch):
     live_redis(monkeypatch, killed=1)
     p.refresh()
     assert p.app.test_client().get("/work").status_code == 503
+
+def test_stale_kill_is_cleared_when_redis_returns_without_it(monkeypatch):
+    live_redis(monkeypatch, killed=1)
+    p.refresh()
+    monkeypatch.setattr(p, "r", DeadRedis())
+    p.refresh()
+    live_redis(monkeypatch)          # Redis is back and the kill flag is gone
+    p.refresh()
+    assert p.last == (False, 0)
+    
