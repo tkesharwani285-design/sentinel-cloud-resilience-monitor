@@ -6,6 +6,8 @@ A multi-cloud failover monitor. It health-checks two cloud providers every secon
 
 ![Sentinel dashboard](docs/dashboard.png)
 
+_Dashboard after 20 scripted kill-switch tests. The red history bars and Nimbus's lower uptime are the simulated outages._
+
 ## Features
 
 - **Two modes:** Simulation (two mock cloud providers you can kill) and Live (real HTTPS probes to AWS and Google Cloud endpoints)
@@ -13,7 +15,7 @@ A multi-cloud failover monitor. It health-checks two cloud providers every secon
 - **Kill switch, restart button and latency-spike injection** to test outages on either provider
 - **Live-mode latency breakdown:** DNS, TCP, TLS and time to first byte
 - **History charts:** 1h / 24h / 7d uptime bars and a latency graph, saved across restarts
-- **Measured failover and detection times (MTTD)** from kill-switch tests
+- **Measured failover, detection (MTTD) and recovery (restart to healthy) times** from kill-switch tests
 - **Discord alerts** for failed checks, failovers and recoveries (optional)
 - **CSV export** of the event log and 24h history
 - **Redis-outage resilience:** providers keep serving traffic and keep the last known kill flag when Redis is down
@@ -73,6 +75,7 @@ Live mode probes `https://dynamodb.ap-south-1.amazonaws.com/ping` and `https://s
 1. Click **Kill Nimbus**. Within about a second the health check fails, traffic moves to Stratus, and the failover log fills in.
 2. Click **Restart**. Nimbus recovers, traffic fails back, and the state-sync panel shows it catching up.
 3. Switch to **Live data** to see real latency measured against public cloud endpoints. In Live mode the kill button simulates a blocked route, since you cannot switch off AWS.
+4. Click **Reset metrics** to clear the history and counters. This also restarts any killed provider.
 
 Useful terminal commands:
 
@@ -96,18 +99,19 @@ When you press **Kill**:
 
 ## Measured results
 
-Simulation mode, scripted kill-switch tests (kill the primary, wait 6 s, restart it, wait 10 s), 17 runs after resetting metrics:
+Simulation mode, scripted kill-switch tests (kill the primary, wait 6 s, restart it, wait 10 s), 20 runs after resetting metrics:
 
-| Metric                                | Result                                                                |
-| ------------------------------------- | --------------------------------------------------------------------- |
-| Average failover time                 | **0.9 s**                                                             |
-| Average failure-detection time (MTTD) | **0.8 s**                                                             |
-| Request success rate                  | **100%** (1,062 test requests across 32 failover and failback events) |
+| Metric                                   | Average over 20 runs                                                |
+| ---------------------------------------- | ------------------------------------------------------------------- |
+| Failover time (Kill to traffic rerouted) | **0.6 s**                                                           |
+| Failure-detection time (MTTD)            | **0.6 s**                                                           |
+| Recovery time (Restart to healthy)       | **0.8 s**                                                           |
+| Request success rate                     | **100%** (882 test requests across 40 failover and failback events) |
 
 - **What "failover time" means:** the time from pressing Kill to Sentinel switching its routing decision. It is not user-visible downtime, because Nginx retries failed requests on the backup immediately.
-- Health checks run once per second and providers refresh the kill flag every 0.2 s, so timings have about 1 s resolution. Before the Redis-outage fix the average was 0.6 s over 28 tests; the fix adds up to 0.2 s.
-- The success-rate traffic comes from Sentinel itself (about 3 requests per second), so it is a functional check, not a load test.
-- The **recovery time (MTTR)** card mostly reflects how long the test waits before restarting the provider, so treat it as informational.
+- **Recovery time** starts when Restart is pressed and ends when the provider passes its next health check.
+- Health checks run once per second and providers refresh the kill flag every 0.2 s, so timings have about 1 s resolution and vary by a few tenths of a second between runs. Earlier runs gave 0.6 s over 28 tests (before the Redis-outage fix) and 0.9 s over 17 tests (after it).
+- The success-rate traffic comes from Sentinel itself (a few requests per second), so it is a functional check, not a load test.
 
 ## Resilience testing
 
@@ -141,7 +145,7 @@ The cause was that Nginx looked up the provider addresses once, at startup. The 
 
 ## Tests and CI
 
-Thirteen pytest tests run on every push with GitHub Actions. Seven cover the Sentinel routing logic (failover and failback, total outage, failover timing, state sync, history maths, status API, CSV export). Six (`tests/test_provider.py`) cover the Redis-outage behaviour: flags are cached, requests are served in under 0.5 s with Redis down, a killed provider stays killed, and a stale kill is cleared when Redis returns. They use a fake Redis, so they check logic but do not kill a real container behind Nginx.
+Sixteen pytest tests run on every push with GitHub Actions. Ten (`tests/test_sentinel.py`) cover the Sentinel monitor: failover and failback, total outage, failover timing, state sync, history maths, status API, CSV export, recovery-time measurement from the Restart press, the restart endpoint and the reset endpoint. Six (`tests/test_provider.py`) cover the Redis-outage behaviour: flags are cached, requests are served in under 0.5 s with Redis down, a killed provider stays killed, and a stale kill is cleared when Redis returns. They use a fake Redis, so they check logic but do not kill a real container behind Nginx.
 
 Run locally:
 
@@ -182,7 +186,6 @@ pytest -q
 
 - End-to-end failover test through Nginx
 - Per-request tracing to separate in-flight failures from switchover failures
-- Measure recovery time from restart to healthy instead of from the Restart click
 - Prometheus and Grafana metrics
 - Real Redis replication instead of simulated sync
 - Circuit breaker with gradual traffic return
