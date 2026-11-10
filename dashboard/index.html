@@ -1,176 +1,934 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sentinel · Cloud Resilience Monitor</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<style>
-:root{--ink:#0b1022;--panel:#131b33;--panel2:#18224280;--line:#26335a;--text:#e9eeff;--mute:#8d9bc4;
---a:#5b8cff;--b:#ff7aa8;--ok:#3ddba4;--warn:#ffc552;--bad:#ff4d5e}
-*{box-sizing:border-box}
-body{margin:0;background:radial-gradient(1100px 600px at 12% -10%,#1d2a63 0,transparent 60%),radial-gradient(900px 500px at 100% 0,#3a1740 0,transparent 55%),var(--ink);
-color:var(--text);font:15px/1.5 "JetBrains Mono",monospace;min-height:100vh}
-body.alert{background:radial-gradient(1100px 600px at 12% -10%,#4a1420 0,transparent 60%),radial-gradient(900px 500px at 100% 0,#3a1740 0,transparent 55%),var(--ink)}
-.wrap{max-width:1280px;margin:0 auto;padding:28px 24px 60px}
-h1,h2,.big{font-family:Unbounded,sans-serif}
-h1{font-size:clamp(1.8rem,3.4vw,3rem);margin:0;font-weight:800;letter-spacing:-.02em}
-h2{font-size:1rem;margin:0 0 14px;font-weight:600}
-.top{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;flex-wrap:wrap;margin-bottom:22px}
-.top p{margin:6px 0 0;color:var(--mute);max-width:60ch}
-.banner{display:flex;align-items:center;gap:12px;padding:14px 20px;border-radius:14px;border:1px solid var(--ok);background:#3ddba414;font-weight:700}
-.banner.warn{border-color:var(--warn);background:#ffc55214}.banner.bad{border-color:var(--bad);background:#ff4d5e1f}
-.dot{width:11px;height:11px;border-radius:50%;background:var(--ok);box-shadow:0 0 12px currentColor;color:var(--ok)}
-.warn .dot{background:var(--warn);color:var(--warn)}.bad .dot{background:var(--bad);color:var(--bad);animation:pulse 1s infinite}
-@keyframes pulse{50%{opacity:.3}}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:20px}
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
-.stat .big{font-size:1.9rem;font-weight:600;line-height:1.1}.stat span{color:var(--mute);font-size:.82rem}
-.grid{display:grid;grid-template-columns:1.5fr 1fr;gap:18px;margin-bottom:18px}
-.provs{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}
-.prov{border-top:4px solid var(--c);position:relative}
-.prov.down{border-color:var(--bad);background:linear-gradient(#ff4d5e12,transparent 60%),var(--panel)}
-.prov header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
-.prov h3{margin:0;font:600 1.15rem Unbounded}.prov small{color:var(--mute)}
-.tag{padding:4px 10px;border-radius:99px;font-size:.78rem;font-weight:700;background:#3ddba422;color:var(--ok)}
-.tag.bad{background:#ff4d5e22;color:var(--bad)}.tag.warn{background:#ffc55222;color:var(--warn)}.tag.live{background:var(--c);color:#0b1022}
-.row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:14px 0}
-.row div{background:#0b102288;border-radius:10px;padding:10px}.row b{display:block;font:600 1.2rem Unbounded}.row span{color:var(--mute);font-size:.78rem}
-.btns{display:flex;gap:8px;flex-wrap:wrap}
-button{font:700 .85rem "JetBrains Mono";border-radius:10px;padding:10px 14px;border:1px solid var(--line);background:#0b1022;color:var(--text);cursor:pointer}
-button:hover{border-color:var(--text)}button:focus-visible{outline:2px solid var(--a);outline-offset:2px}
-button.kill{background:var(--bad);border-color:var(--bad);color:#fff}button.kill:disabled{opacity:.35;cursor:not-allowed}
-.log{max-height:330px;overflow:auto;display:grid;gap:8px}
-.ev{display:grid;grid-template-columns:78px 1fr;gap:10px;padding:8px 10px;border-left:3px solid var(--mute);background:#0b102288;border-radius:0 8px 8px 0;font-size:.84rem}
-.ev.bad{border-color:var(--bad)}.ev.warn{border-color:var(--warn)}.ev.ok{border-color:var(--ok)}.ev time{color:var(--mute)}
-.flow{stroke-dasharray:8 8;animation:dash .7s linear infinite}@keyframes dash{to{stroke-dashoffset:-16}}
-.empty{color:var(--mute)}
-.probe{display:flex;gap:14px;flex-wrap:wrap;margin:-4px 0 14px;color:var(--mute);font-size:.8rem}.probe b{color:var(--text)}
-.seg{display:inline-flex;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:12px}.seg button{border:0;border-radius:0;background:transparent}.seg button.on{background:var(--text);color:var(--ink)}
-.m3{grid-template-columns:repeat(3,1fr)}.hh{display:flex;justify-content:space-between;align-items:center}.hh .seg{margin:0 0 14px}
-.strip{display:grid;grid-template-columns:70px 1fr;align-items:center;gap:10px;margin:8px 0}.strip div{display:flex;gap:2px;height:26px}.strip i{flex:1;border-radius:2px;min-width:2px}
-.lnk{font:700 .85rem "JetBrains Mono";border-radius:10px;padding:10px 14px;border:1px solid var(--line);background:#0b1022;color:var(--text);text-decoration:none}.lnk:hover{border-color:var(--text)}
-.sec{margin-bottom:18px}
-@media(max-width:980px){.stats{grid-template-columns:1fr 1fr}.grid,.provs{grid-template-columns:1fr}.m3{grid-template-columns:1fr}}
-@media(prefers-reduced-motion:reduce){.flow,.dot{animation:none}}
-</style>
-</head>
-<body>
-<div id="root"></div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
-<script type="text/babel">
-const {useState,useEffect}=React;
-const COLOR={a:"#5b8cff",b:"#ff7aa8"};
-const post=(p)=>fetch("/api/"+p,{method:"POST"});
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sentinel · Cloud Resilience Monitor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600;800&family=JetBrains+Mono:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --ink: #0b1022;
+        --panel: #131b33;
+        --panel2: #18224280;
+        --line: #26335a;
+        --text: #e9eeff;
+        --mute: #8d9bc4;
+        --a: #5b8cff;
+        --b: #ff7aa8;
+        --ok: #3ddba4;
+        --warn: #ffc552;
+        --bad: #ff4d5e;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background:
+          radial-gradient(1100px 600px at 12% -10%, #1d2a63 0, transparent 60%),
+          radial-gradient(900px 500px at 100% 0, #3a1740 0, transparent 55%),
+          var(--ink);
+        color: var(--text);
+        font:
+          15px/1.5 "JetBrains Mono",
+          monospace;
+        min-height: 100vh;
+      }
+      body.alert {
+        background:
+          radial-gradient(1100px 600px at 12% -10%, #4a1420 0, transparent 60%),
+          radial-gradient(900px 500px at 100% 0, #3a1740 0, transparent 55%),
+          var(--ink);
+      }
+      .wrap {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 28px 24px 60px;
+      }
+      h1,
+      h2,
+      .big {
+        font-family: Unbounded, sans-serif;
+      }
+      h1 {
+        font-size: clamp(1.8rem, 3.4vw, 3rem);
+        margin: 0;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+      }
+      h2 {
+        font-size: 1rem;
+        margin: 0 0 14px;
+        font-weight: 600;
+      }
+      .top {
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+        align-items: flex-end;
+        flex-wrap: wrap;
+        margin-bottom: 22px;
+      }
+      .top p {
+        margin: 6px 0 0;
+        color: var(--mute);
+        max-width: 60ch;
+      }
+      .banner {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 20px;
+        border-radius: 14px;
+        border: 1px solid var(--ok);
+        background: #3ddba414;
+        font-weight: 700;
+      }
+      .banner.warn {
+        border-color: var(--warn);
+        background: #ffc55214;
+      }
+      .banner.bad {
+        border-color: var(--bad);
+        background: #ff4d5e1f;
+      }
+      .dot {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: var(--ok);
+        box-shadow: 0 0 12px currentColor;
+        color: var(--ok);
+      }
+      .warn .dot {
+        background: var(--warn);
+        color: var(--warn);
+      }
+      .bad .dot {
+        background: var(--bad);
+        color: var(--bad);
+        animation: pulse 1s infinite;
+      }
+      @keyframes pulse {
+        50% {
+          opacity: 0.3;
+        }
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 20px;
+      }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 14px;
+        margin-bottom: 18px;
+      }
+      .stat .big {
+        font-size: 1.9rem;
+        font-weight: 600;
+        line-height: 1.1;
+      }
+      .stat span {
+        color: var(--mute);
+        font-size: 0.82rem;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1.5fr 1fr;
+        gap: 18px;
+        margin-bottom: 18px;
+      }
+      .provs {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin-bottom: 18px;
+      }
+      .prov {
+        border-top: 4px solid var(--c);
+        position: relative;
+      }
+      .prov.down {
+        border-color: var(--bad);
+        background: linear-gradient(#ff4d5e12, transparent 60%), var(--panel);
+      }
+      .prov header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+      .prov h3 {
+        margin: 0;
+        font: 600 1.15rem Unbounded;
+      }
+      .prov small {
+        color: var(--mute);
+      }
+      .tag {
+        padding: 4px 10px;
+        border-radius: 99px;
+        font-size: 0.78rem;
+        font-weight: 700;
+        background: #3ddba422;
+        color: var(--ok);
+      }
+      .tag.bad {
+        background: #ff4d5e22;
+        color: var(--bad);
+      }
+      .tag.warn {
+        background: #ffc55222;
+        color: var(--warn);
+      }
+      .tag.live {
+        background: var(--c);
+        color: #0b1022;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        margin: 14px 0;
+      }
+      .row div {
+        background: #0b102288;
+        border-radius: 10px;
+        padding: 10px;
+      }
+      .row b {
+        display: block;
+        font: 600 1.2rem Unbounded;
+      }
+      .row span {
+        color: var(--mute);
+        font-size: 0.78rem;
+      }
+      .btns {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      button {
+        font: 700 0.85rem "JetBrains Mono";
+        border-radius: 10px;
+        padding: 10px 14px;
+        border: 1px solid var(--line);
+        background: #0b1022;
+        color: var(--text);
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: var(--text);
+      }
+      button:focus-visible {
+        outline: 2px solid var(--a);
+        outline-offset: 2px;
+      }
+      button.kill {
+        background: var(--bad);
+        border-color: var(--bad);
+        color: #fff;
+      }
+      button.kill:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+      }
+      .log {
+        max-height: 330px;
+        overflow: auto;
+        display: grid;
+        gap: 8px;
+      }
+      .ev {
+        display: grid;
+        grid-template-columns: 78px 1fr;
+        gap: 10px;
+        padding: 8px 10px;
+        border-left: 3px solid var(--mute);
+        background: #0b102288;
+        border-radius: 0 8px 8px 0;
+        font-size: 0.84rem;
+      }
+      .ev.bad {
+        border-color: var(--bad);
+      }
+      .ev.warn {
+        border-color: var(--warn);
+      }
+      .ev.ok {
+        border-color: var(--ok);
+      }
+      .ev time {
+        color: var(--mute);
+      }
+      .flow {
+        stroke-dasharray: 8 8;
+        animation: dash 0.7s linear infinite;
+      }
+      @keyframes dash {
+        to {
+          stroke-dashoffset: -16;
+        }
+      }
+      .empty {
+        color: var(--mute);
+      }
+      .probe {
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+        margin: -4px 0 14px;
+        color: var(--mute);
+        font-size: 0.8rem;
+      }
+      .probe b {
+        color: var(--text);
+      }
+      .seg {
+        display: inline-flex;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+        margin-top: 12px;
+      }
+      .seg button {
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+      }
+      .seg button.on {
+        background: var(--text);
+        color: var(--ink);
+      }
+      .m3 {
+        grid-template-columns: repeat(3, 1fr);
+      }
+      .hh {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .hh .seg {
+        margin: 0 0 14px;
+      }
+      .strip {
+        display: grid;
+        grid-template-columns: 70px 1fr;
+        align-items: center;
+        gap: 10px;
+        margin: 8px 0;
+      }
+      .strip div {
+        display: flex;
+        gap: 2px;
+        height: 26px;
+      }
+      .strip i {
+        flex: 1;
+        border-radius: 2px;
+        min-width: 2px;
+      }
+      .lnk {
+        font: 700 0.85rem "JetBrains Mono";
+        border-radius: 10px;
+        padding: 10px 14px;
+        border: 1px solid var(--line);
+        background: #0b1022;
+        color: var(--text);
+        text-decoration: none;
+      }
+      .lnk:hover {
+        border-color: var(--text);
+      }
+      .sec {
+        margin-bottom: 18px;
+      }
+      @media (max-width: 980px) {
+        .stats {
+          grid-template-columns: 1fr 1fr;
+        }
+        .grid,
+        .provs {
+          grid-template-columns: 1fr;
+        }
+        .m3 {
+          grid-template-columns: 1fr;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .flow,
+        .dot {
+          animation: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+    <script type="text/babel">
+      const { useState, useEffect } = React;
+      const COLOR = { a: "#5b8cff", b: "#ff7aa8" };
+      const post = (p) => fetch("/api/" + p, { method: "POST" });
 
-function Spark({data,color}){
-  const w=300,h=56,max=Math.max(120,...data);
-  const pts=data.map((v,i)=>[i*(w/59),v<0?h-2:h-4-(v/max)*(h-10),v<0]);
-  const line=pts.filter(p=>!p[2]).map(p=>p[0]+","+p[1]).join(" ");
-  return <svg viewBox={`0 0 ${w} ${h}`} width="100%" height="56" role="img" aria-label="Latency, last 60 checks">
-    <polyline points={line} fill="none" stroke={color} strokeWidth="2"/>
-    {pts.filter(p=>p[2]).map((p,i)=><rect key={i} x={p[0]-1.5} y="4" width="3" height={h-8} fill="#ff4d5e" opacity=".55"/>)}
-  </svg>;
-}
+      function Spark({ data, color }) {
+        const w = 300,
+          h = 56,
+          max = Math.max(120, ...data);
+        const pts = data.map((v, i) => [
+          i * (w / 59),
+          v < 0 ? h - 2 : h - 4 - (v / max) * (h - 10),
+          v < 0,
+        ]);
+        const line = pts
+          .filter((p) => !p[2])
+          .map((p) => p[0] + "," + p[1])
+          .join(" ");
+        return (
+          <svg
+            viewBox={`0 0 ${w} ${h}`}
+            width="100%"
+            height="56"
+            role="img"
+            aria-label="Latency, last 60 checks"
+          >
+            <polyline
+              points={line}
+              fill="none"
+              stroke={color}
+              strokeWidth="2"
+            />
+            {pts
+              .filter((p) => p[2])
+              .map((p, i) => (
+                <rect
+                  key={i}
+                  x={p[0] - 1.5}
+                  y="4"
+                  width="3"
+                  height={h - 8}
+                  fill="#ff4d5e"
+                  opacity=".55"
+                />
+              ))}
+          </svg>
+        );
+      }
 
-function Topology({s}){
-  const node=(x,y,label,sub,c,off)=><g>
-    <rect x={x-62} y={y-30} width="124" height="60" rx="14" fill="#0b1022" stroke={off?"#ff4d5e":c} strokeWidth="2"/>
-    <text x={x} y={y-3} textAnchor="middle" fill="#e9eeff" fontFamily="Unbounded" fontSize="13">{label}</text>
-    <text x={x} y={y+16} textAnchor="middle" fill={off?"#ff4d5e":"#8d9bc4"} fontSize="11">{sub}</text></g>;
-  const link=(k,y)=>{const p=s.providers[k],live=s.active===k;
-    return <path d={`M402 130 C 480 130, 480 ${y}, 558 ${y}`} fill="none" strokeWidth={live?4:2}
-      stroke={!p.up?"#ff4d5e":live?COLOR[k]:"#26335a"} strokeDasharray={!p.up?"3 7":undefined} className={live?"flow":""}/>};
-  return <svg viewBox="0 0 720 260" width="100%" role="img" aria-label="Traffic topology">
-    <path d="M142 130 L278 130" stroke={s.active==="none"?"#ff4d5e":"#e9eeff"} strokeWidth="3" className={s.active==="none"?"":"flow"}/>
-    {link("a",60)}{link("b",200)}
-    {node(80,130,"Users",s.req.toLocaleString()+" requests","#e9eeff")}
-    {node(340,130,"Nginx","load balancer","#3ddba4")}
-    {node(620,60,s.providers.a.label.split(" ")[0],s.providers.a.region,COLOR.a,!s.providers.a.up)}
-    {node(620,200,s.providers.b.label.split(" ")[0],s.providers.b.region,COLOR.b,!s.providers.b.up)}
-  </svg>;
-}
+      function Topology({ s }) {
+        const node = (x, y, label, sub, c, off) => (
+          <g>
+            <rect
+              x={x - 62}
+              y={y - 30}
+              width="124"
+              height="60"
+              rx="14"
+              fill="#0b1022"
+              stroke={off ? "#ff4d5e" : c}
+              strokeWidth="2"
+            />
+            <text
+              x={x}
+              y={y - 3}
+              textAnchor="middle"
+              fill="#e9eeff"
+              fontFamily="Unbounded"
+              fontSize="13"
+            >
+              {label}
+            </text>
+            <text
+              x={x}
+              y={y + 16}
+              textAnchor="middle"
+              fill={off ? "#ff4d5e" : "#8d9bc4"}
+              fontSize="11"
+            >
+              {sub}
+            </text>
+          </g>
+        );
+        const link = (k, y) => {
+          const p = s.providers[k],
+            live = s.active === k;
+          return (
+            <path
+              d={`M402 130 C 480 130, 480 ${y}, 558 ${y}`}
+              fill="none"
+              strokeWidth={live ? 4 : 2}
+              stroke={!p.up ? "#ff4d5e" : live ? COLOR[k] : "#26335a"}
+              strokeDasharray={!p.up ? "3 7" : undefined}
+              className={live ? "flow" : ""}
+            />
+          );
+        };
+        return (
+          <svg
+            viewBox="0 0 720 260"
+            width="100%"
+            role="img"
+            aria-label="Traffic topology"
+          >
+            <path
+              d="M142 130 L278 130"
+              stroke={s.active === "none" ? "#ff4d5e" : "#e9eeff"}
+              strokeWidth="3"
+              className={s.active === "none" ? "" : "flow"}
+            />
+            {link("a", 60)}
+            {link("b", 200)}
+            {node(
+              80,
+              130,
+              "Users",
+              s.req.toLocaleString() + " requests",
+              "#e9eeff",
+            )}
+            {node(340, 130, "Nginx", "load balancer", "#3ddba4")}
+            {node(
+              620,
+              60,
+              s.providers.a.label.split(" ")[0],
+              s.providers.a.region,
+              COLOR.a,
+              !s.providers.a.up,
+            )}
+            {node(
+              620,
+              200,
+              s.providers.b.label.split(" ")[0],
+              s.providers.b.region,
+              COLOR.b,
+              !s.providers.b.up,
+            )}
+          </svg>
+        );
+      }
 
-function Provider({k,p,active,live}){
-  const c=COLOR[k], tag=!p.up?["Offline","bad"]:p.spike?["Degraded","warn"]:["Healthy",""];
-  return <section className={"panel prov"+(p.up?"":" down")} style={{"--c":c}}>
-    <header><div><h3>{p.label}</h3><small>{p.region} · {k==="a"?"primary":"standby"}</small></div>
-      <div className="btns">{active===k&&<span className="tag live">Serving traffic</span>}<span className={"tag "+tag[1]}>{tag[0]}</span></div></header>
-    <Spark data={p.hist} color={c}/>
-    <div className="row">
-      <div><b>{p.latency<0?"—":p.latency+" ms"}</b><span>Latency</span></div>
-      <div><b>{p.uptime}%</b><span>Uptime</span></div>
-      <div><b style={{color:p.sync==="in sync"?"var(--ok)":p.sync==="syncing"?"var(--warn)":"var(--bad)"}}>{p.sync==="in sync"?"Synced":p.sync==="syncing"?"Syncing":"Stale"}</b><span>{p.lag>0?p.lag+" writes behind":"State replica"}</span></div>
-    </div>
-    {live&&p.probe&&<div className="probe"><span>DNS <b>{p.probe.dns} ms</b></span><span>TCP <b>{p.probe.tcp} ms</b></span><span>TLS <b>{p.probe.tls} ms</b></span><span>First byte <b>{p.probe.ttfb} ms</b></span><span>HTTP <b>{p.probe.status||"—"}</b></span></div>}
-    <div className="btns">
-      <button className="kill" disabled={!p.up&&p.killed} onClick={()=>post("kill/"+k)}>Kill {p.label.split(" ")[0]}</button>
-      <button onClick={()=>post("revive/"+k)}>Restart</button>
-      <button disabled={live} title={live?"Latency spikes are simulation-only":""} onClick={()=>post("spike/"+k)}>{p.spike?"Clear latency spike":"Inject latency spike"}</button>
-    </div>
-  </section>;
-}
+      function Provider({ k, p, active, live }) {
+        const c = COLOR[k],
+          tag = !p.up
+            ? ["Offline", "bad"]
+            : p.spike
+              ? ["Degraded", "warn"]
+              : ["Healthy", ""];
+        return (
+          <section
+            className={"panel prov" + (p.up ? "" : " down")}
+            style={{ "--c": c }}
+          >
+            <header>
+              <div>
+                <h3>{p.label}</h3>
+                <small>
+                  {p.region} · {k === "a" ? "primary" : "standby"}
+                </small>
+              </div>
+              <div className="btns">
+                {active === k && (
+                  <span className="tag live">Serving traffic</span>
+                )}
+                <span className={"tag " + tag[1]}>{tag[0]}</span>
+              </div>
+            </header>
+            <Spark data={p.hist} color={c} />
+            <div className="row">
+              <div>
+                <b>{p.latency < 0 ? "—" : p.latency + " ms"}</b>
+                <span>Latency</span>
+              </div>
+              <div>
+                <b>{p.uptime}%</b>
+                <span>Uptime</span>
+              </div>
+              <div>
+                <b
+                  style={{
+                    color:
+                      p.sync === "in sync"
+                        ? "var(--ok)"
+                        : p.sync === "syncing"
+                          ? "var(--warn)"
+                          : "var(--bad)",
+                  }}
+                >
+                  {p.sync === "in sync"
+                    ? "Synced"
+                    : p.sync === "syncing"
+                      ? "Syncing"
+                      : "Stale"}
+                </b>
+                <span>
+                  {p.lag > 0 ? p.lag + " writes behind" : "State replica"}
+                </span>
+              </div>
+            </div>
+            {live && p.probe && (
+              <div className="probe">
+                <span>
+                  DNS <b>{p.probe.dns} ms</b>
+                </span>
+                <span>
+                  TCP <b>{p.probe.tcp} ms</b>
+                </span>
+                <span>
+                  TLS <b>{p.probe.tls} ms</b>
+                </span>
+                <span>
+                  First byte <b>{p.probe.ttfb} ms</b>
+                </span>
+                <span>
+                  HTTP <b>{p.probe.status || "—"}</b>
+                </span>
+              </div>
+            )}
+            <div className="btns">
+              <button
+                className="kill"
+                disabled={!p.up && p.killed}
+                onClick={() => post("kill/" + k)}
+              >
+                Kill {p.label.split(" ")[0]}
+              </button>
+              <button onClick={() => post("revive/" + k)}>Restart</button>
+              <button
+                disabled={live}
+                title={live ? "Latency spikes are simulation-only" : ""}
+                onClick={() => post("spike/" + k)}
+              >
+                {p.spike ? "Clear latency spike" : "Inject latency spike"}
+              </button>
+            </div>
+          </section>
+        );
+      }
 
-function Metrics({m}){
-  const f=v=>v?(v.last/1000).toFixed(1)+" s":"—";
-  const items=[["Failover time",m.failover_ms,"Kill pressed to traffic rerouted"],["Detection time (MTTD)",m.mttd,"Kill pressed to failure detected"],["Recovery time (MTTR)",m.mttr,"Failure detected to healthy again"]];
-  return <div className="stats m3">{items.map(([t,v,d])=><div key={t} className="panel stat"><div className="big">{f(v)}</div><span>{t}</span><br/><span>{v?"average "+(v.avg/1000).toFixed(1)+" s over "+v.n+" test"+(v.n>1?"s":""):d}</span></div>)}</div>;
-}
+      function Metrics({ m }) {
+        const f = (v) => (v ? (v.last / 1000).toFixed(1) + " s" : "—");
+        const items = [
+          ["Failover time", m.failover_ms, "Kill pressed to traffic rerouted"],
+          ["Detection time (MTTD)", m.mttd, "Kill pressed to failure detected"],
+          [
+            "Recovery time (restart to healthy)",
+            m.mttr,
+            "Restart pressed to healthy again",
+          ],
+        ];
+        return (
+          <div className="stats m3">
+            {items.map(([t, v, d]) => (
+              <div key={t} className="panel stat">
+                <div className="big">{f(v)}</div>
+                <span>{t}</span>
+                <br />
+                <span>
+                  {v
+                    ? "average " +
+                      (v.avg / 1000).toFixed(1) +
+                      " s over " +
+                      v.n +
+                      " test" +
+                      (v.n > 1 ? "s" : "")
+                    : d}
+                </span>
+              </div>
+            ))}
+          </div>
+        );
+      }
 
-function History(){
-  const [r,setR]=useState("1h"),[h,setH]=useState(null);
-  useEffect(()=>{const go=()=>fetch("/api/history?range="+r).then(x=>x.json()).then(setH).catch(()=>{});go();const t=setInterval(go,5000);return()=>clearInterval(t)},[r]);
-  const col=u=>u>=99.9?"#3ddba4":u>=95?"#ffc552":"#ff4d5e";
-  const maxL=h?Math.max(100,...["a","b"].flatMap(k=>h[k].map(p=>p.latency||0))):100;
-  const pts=k=>{const d=h[k].filter(p=>p.latency!=null);return d.map((p,i)=>(d.length<2?0:i*600/(d.length-1))+","+(112-(p.latency/maxL)*104)).join(" ")};
-  return <section className="panel sec"><div className="hh"><h2>History: uptime and latency</h2>
-    <div className="seg" role="group" aria-label="Time range">{["1h","24h","7d"].map(v=><button key={v} className={r===v?"on":""} onClick={()=>setR(v)}>{v}</button>)}</div></div>
-    {!h?<p className="empty">Loading…</p>:h.a.length===0?<p className="empty">Collecting data. Bars appear after a minute.</p>:<>
-      {["a","b"].map(k=><div key={k} className="strip"><span style={{color:COLOR[k]}}>{k==="a"?"Primary":"Standby"}</span>
-        <div>{h[k].map((p,i)=><i key={i} title={new Date(p.t*1000).toLocaleString()+": "+p.uptime+"% up, "+(p.latency??"—")+" ms"} style={{background:col(p.uptime)}}/>)}</div></div>)}
-      <svg viewBox="0 0 600 120" width="100%" role="img" aria-label="Average latency over time"><line x1="0" y1="112" x2="600" y2="112" stroke="#26335a"/>
-        <polyline points={pts("a")} fill="none" stroke={COLOR.a} strokeWidth="2"/><polyline points={pts("b")} fill="none" stroke={COLOR.b} strokeWidth="2"/>
-        <text x="4" y="12" fill="#8d9bc4" fontSize="10">{maxL} ms</text></svg>
-      <p className="empty" style={{fontSize:".78rem",margin:"6px 0 0"}}>Bars: green 99.9%+ up, amber 95%+, red below. Lines: average latency (blue primary, pink standby).</p></>}
-  </section>;
-}
+      function History() {
+        const [r, setR] = useState("1h"),
+          [h, setH] = useState(null);
+        useEffect(() => {
+          const go = () =>
+            fetch("/api/history?range=" + r)
+              .then((x) => x.json())
+              .then(setH)
+              .catch(() => {});
+          go();
+          const t = setInterval(go, 5000);
+          return () => clearInterval(t);
+        }, [r]);
+        const col = (u) =>
+          u >= 99.9 ? "#3ddba4" : u >= 95 ? "#ffc552" : "#ff4d5e";
+        const maxL = h
+          ? Math.max(
+              100,
+              ...["a", "b"].flatMap((k) => h[k].map((p) => p.latency || 0)),
+            )
+          : 100;
+        const pts = (k) => {
+          const d = h[k].filter((p) => p.latency != null);
+          return d
+            .map(
+              (p, i) =>
+                (d.length < 2 ? 0 : (i * 600) / (d.length - 1)) +
+                "," +
+                (112 - (p.latency / maxL) * 104),
+            )
+            .join(" ");
+        };
+        return (
+          <section className="panel sec">
+            <div className="hh">
+              <h2>History: uptime and latency</h2>
+              <div className="seg" role="group" aria-label="Time range">
+                {["1h", "24h", "7d"].map((v) => (
+                  <button
+                    key={v}
+                    className={r === v ? "on" : ""}
+                    onClick={() => setR(v)}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {!h ? (
+              <p className="empty">Loading…</p>
+            ) : h.a.length === 0 ? (
+              <p className="empty">
+                Collecting data. Bars appear after a minute.
+              </p>
+            ) : (
+              <>
+                {["a", "b"].map((k) => (
+                  <div key={k} className="strip">
+                    <span style={{ color: COLOR[k] }}>
+                      {k === "a" ? "Primary" : "Standby"}
+                    </span>
+                    <div>
+                      {h[k].map((p, i) => (
+                        <i
+                          key={i}
+                          title={
+                            new Date(p.t * 1000).toLocaleString() +
+                            ": " +
+                            p.uptime +
+                            "% up, " +
+                            (p.latency ?? "—") +
+                            " ms"
+                          }
+                          style={{ background: col(p.uptime) }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <svg
+                  viewBox="0 0 600 120"
+                  width="100%"
+                  role="img"
+                  aria-label="Average latency over time"
+                >
+                  <line x1="0" y1="112" x2="600" y2="112" stroke="#26335a" />
+                  <polyline
+                    points={pts("a")}
+                    fill="none"
+                    stroke={COLOR.a}
+                    strokeWidth="2"
+                  />
+                  <polyline
+                    points={pts("b")}
+                    fill="none"
+                    stroke={COLOR.b}
+                    strokeWidth="2"
+                  />
+                  <text x="4" y="12" fill="#8d9bc4" fontSize="10">
+                    {maxL} ms
+                  </text>
+                </svg>
+                <p
+                  className="empty"
+                  style={{ fontSize: ".78rem", margin: "6px 0 0" }}
+                >
+                  Bars: green 99.9%+ up, amber 95%+, red below. Lines: average
+                  latency (blue primary, pink standby).
+                </p>
+              </>
+            )}
+          </section>
+        );
+      }
 
-function App(){
-  const [s,setS]=useState(null),[err,setErr]=useState(false);
-  useEffect(()=>{const t=setInterval(()=>fetch("/api/status").then(r=>r.json()).then(d=>{setS(d);setErr(false)}).catch(()=>setErr(true)),1000);return()=>clearInterval(t)},[]);
-  useEffect(()=>{document.body.classList.toggle("alert",!!s&&s.active!=="a")},[s&&s.active]);
-  if(!s) return <div className="wrap"><h1>Sentinel</h1><p className="empty">{err?"Can't reach the Sentinel API. Start the stack with docker compose up --build, then open http://localhost:8080.":"Connecting to Sentinel…"}</p></div>;
-  const {a,b}=s.providers, total=a.served+b.served||1;
-  const state=s.active==="none"?["bad","Total outage. Both providers are down."]:
-    s.active==="a"?(a.spike?["warn",a.label+" is degraded. Traffic is still routed to it."]:["","All systems operational. "+a.label+" is serving traffic."]):
-    ["warn","Failover active. "+b.label+" is serving traffic."];
-  return <div className="wrap">
-    <div className="top"><div><h1>Sentinel</h1><p>{s.mode==="live"?"Live mode: real HTTPS probes to AWS and Google Cloud every second. Kill switches simulate a blocked route; the latency numbers are real.":"Simulation mode: two mock cloud providers, health-checked every second. If one fails, Nginx moves traffic to the other."}</p>
-      <div className="seg" role="group" aria-label="Data mode"><button className={s.mode!=="live"?"on":""} onClick={()=>post("mode/sim")}>Simulation</button><button className={s.mode==="live"?"on":""} onClick={()=>post("mode/live")}>Live data</button></div></div>
-      <div className={"banner "+state[0]} role="status"><span className="dot"/>{state[1]}</div></div>
-    <div className="stats">
-      <div className="panel stat"><div className="big">{s.success}%</div><span>Request success rate</span></div>
-      <div className="panel stat"><div className="big">{s.failovers}</div><span>Failover events</span></div>
-      <div className="panel stat"><div className="big">{Math.round(100*a.served/total)} / {Math.round(100*b.served/total)}</div><span>Traffic share, primary / standby (%)</span></div>
-      <div className="panel stat"><div className="big">{s.seq.toLocaleString()}</div><span>Writes committed to shared state</span></div>
-    </div>
-    <div className="grid">
-      <section className="panel"><h2>Live traffic path</h2><Topology s={s}/></section>
-      <section className="panel"><h2>Failover log</h2><div className="log">
-        {s.events.length===0&&<p className="empty">No events yet. Press a kill switch to simulate an outage.</p>}
-        {s.events.map((e,i)=><div key={i} className={"ev "+e.kind}><time>{new Date(e.t*1000).toLocaleTimeString([], {hour12:false})}</time><span>{e.msg}</span></div>)}
-      </div></section>
-    </div>
-    <div className="provs"><Provider k="a" p={a} active={s.active} live={s.mode==="live"}/><Provider k="b" p={b} active={s.active} live={s.mode==="live"}/></div>
-    <Metrics m={s.metrics}/><History/>
-    <div className="btns"><a className="lnk" href="/api/export/events.csv" download>Export events (CSV)</a><a className="lnk" href="/api/export/history.csv" download>Export 24h history (CSV)</a><button onClick={()=>post("reset/x")}>Reset metrics</button></div>
-  </div>;
-}
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
-</script>
-</body>
+      function App() {
+        const [s, setS] = useState(null),
+          [err, setErr] = useState(false);
+        useEffect(() => {
+          const t = setInterval(
+            () =>
+              fetch("/api/status")
+                .then((r) => r.json())
+                .then((d) => {
+                  setS(d);
+                  setErr(false);
+                })
+                .catch(() => setErr(true)),
+            1000,
+          );
+          return () => clearInterval(t);
+        }, []);
+        useEffect(() => {
+          document.body.classList.toggle("alert", !!s && s.active !== "a");
+        }, [s && s.active]);
+        if (!s)
+          return (
+            <div className="wrap">
+              <h1>Sentinel</h1>
+              <p className="empty">
+                {err
+                  ? "Can't reach the Sentinel API. Start the stack with docker compose up --build, then open http://localhost:8080."
+                  : "Connecting to Sentinel…"}
+              </p>
+            </div>
+          );
+        const { a, b } = s.providers,
+          total = a.served + b.served || 1;
+        const state =
+          s.active === "none"
+            ? ["bad", "Total outage. Both providers are down."]
+            : s.active === "a"
+              ? a.spike
+                ? [
+                    "warn",
+                    a.label + " is degraded. Traffic is still routed to it.",
+                  ]
+                : [
+                    "",
+                    "All systems operational. " +
+                      a.label +
+                      " is serving traffic.",
+                  ]
+              : [
+                  "warn",
+                  "Failover active. " + b.label + " is serving traffic.",
+                ];
+        return (
+          <div className="wrap">
+            <div className="top">
+              <div>
+                <h1>Sentinel</h1>
+                <p>
+                  {s.mode === "live"
+                    ? "Live mode: real HTTPS probes to AWS and Google Cloud every second. Kill switches simulate a blocked route; the latency numbers are real."
+                    : "Simulation mode: two mock cloud providers, health-checked every second. If one fails, Nginx moves traffic to the other."}
+                </p>
+                <div className="seg" role="group" aria-label="Data mode">
+                  <button
+                    className={s.mode !== "live" ? "on" : ""}
+                    onClick={() => post("mode/sim")}
+                  >
+                    Simulation
+                  </button>
+                  <button
+                    className={s.mode === "live" ? "on" : ""}
+                    onClick={() => post("mode/live")}
+                  >
+                    Live data
+                  </button>
+                </div>
+              </div>
+              <div className={"banner " + state[0]} role="status">
+                <span className="dot" />
+                {state[1]}
+              </div>
+            </div>
+            <div className="stats">
+              <div className="panel stat">
+                <div className="big">{s.success}%</div>
+                <span>Request success rate</span>
+              </div>
+              <div className="panel stat">
+                <div className="big">{s.failovers}</div>
+                <span>Failover events</span>
+              </div>
+              <div className="panel stat">
+                <div className="big">
+                  {Math.round((100 * a.served) / total)} /{" "}
+                  {Math.round((100 * b.served) / total)}
+                </div>
+                <span>Traffic share, primary / standby (%)</span>
+              </div>
+              <div className="panel stat">
+                <div className="big">{s.seq.toLocaleString()}</div>
+                <span>Writes committed to shared state</span>
+              </div>
+            </div>
+            <div className="grid">
+              <section className="panel">
+                <h2>Live traffic path</h2>
+                <Topology s={s} />
+              </section>
+              <section className="panel">
+                <h2>Failover log</h2>
+                <div className="log">
+                  {s.events.length === 0 && (
+                    <p className="empty">
+                      No events yet. Press a kill switch to simulate an outage.
+                    </p>
+                  )}
+                  {s.events.map((e, i) => (
+                    <div key={i} className={"ev " + e.kind}>
+                      <time>
+                        {new Date(e.t * 1000).toLocaleTimeString([], {
+                          hour12: false,
+                        })}
+                      </time>
+                      <span>{e.msg}</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+            <div className="provs">
+              <Provider
+                k="a"
+                p={a}
+                active={s.active}
+                live={s.mode === "live"}
+              />
+              <Provider
+                k="b"
+                p={b}
+                active={s.active}
+                live={s.mode === "live"}
+              />
+            </div>
+            <Metrics m={s.metrics} />
+            <History />
+            <div className="btns">
+              <a className="lnk" href="/api/export/events.csv" download>
+                Export events (CSV)
+              </a>
+              <a className="lnk" href="/api/export/history.csv" download>
+                Export 24h history (CSV)
+              </a>
+              <button
+                onClick={() =>
+                  window.confirm("Clear all metrics and history?") &&
+                  post("reset")
+                }
+              >
+                Reset metrics
+              </button>
+            </div>
+          </div>
+        );
+      }
+      ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+  </body>
 </html>

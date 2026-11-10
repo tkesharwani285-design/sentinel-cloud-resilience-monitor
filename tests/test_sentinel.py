@@ -47,3 +47,31 @@ def test_events_csv_export():
     s.event("warn", "Failover: test")
     r = s.app.test_client().get("/api/export/events.csv")
     assert r.status_code == 200 and "Failover: test" in r.get_data(as_text=True)
+
+
+def test_recovery_time_is_measured_from_the_restart_press(monkeypatch):
+    class Resp:
+        status_code = 200
+    monkeypatch.setattr(s.requests, "get", lambda *a, **k: Resp())
+    s.R.hset("s:a", mapping={"up": 0, "lat": -1})
+    s.R.set("down:a", time.time() - 100)       # a long outage ...
+    s.R.set("revive_at:a", time.time() - 2)    # ... but Restart was pressed 2 s ago
+    assert s.check("a") is True
+    assert 2000 <= int(s.R.lrange("mttr", 0, 0)[0]) < 3500
+
+
+def test_restart_only_starts_the_recovery_timer_when_the_provider_is_down():
+    client = s.app.test_client()
+    s.R.hset("s:a", mapping={"up": 1, "lat": 20})
+    client.post("/api/revive/a")
+    assert s.R.get("revive_at:a") is None
+    s.R.hset("s:a", mapping={"up": 0, "lat": -1})
+    client.post("/api/revive/a")
+    assert s.R.get("revive_at:a") is not None
+
+
+def test_reset_clears_metrics_but_keeps_the_mode():
+    s.R.set("failovers", 5)
+    s.R.set("mode", "live")
+    assert s.app.test_client().post("/api/reset").status_code == 200
+    assert s.R.get("failovers") is None and s.R.get("mode") == "live"

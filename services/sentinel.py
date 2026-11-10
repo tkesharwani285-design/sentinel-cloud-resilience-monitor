@@ -75,7 +75,10 @@ def check(k):
         if ok:
             dur = time.time() - float(R.get(f"down:{k}") or time.time())
             R.delete(f"down:{k}"); R.delete(f"killed_at:{k}")
-            R.lpush("mttr", round(dur * 1000)); R.ltrim("mttr", 0, 49)
+            ra = R.get(f"revive_at:{k}")   # recovery time = Restart press to healthy again
+            if ra:
+                R.lpush("mttr", round((time.time() - float(ra)) * 1000)); R.ltrim("mttr", 0, 49)
+                R.delete(f"revive_at:{k}")
             event("ok", f"{p['label']} recovered after {dur:.1f}s")
         else:
             R.set(f"down:{k}", time.time())
@@ -198,9 +201,11 @@ def control(action, k):
     if k not in P: return jsonify(error="unknown provider"), 404
     name = info(k)["label"]
     if action == "kill":
-        R.set(f"{k}:killed", 1); R.set(f"killed_at:{k}", time.time()); event("bad", f"Kill switch pressed on {name}")
+        R.set(f"{k}:killed", 1); R.set(f"killed_at:{k}", time.time()); R.delete(f"revive_at:{k}"); event("bad", f"Kill switch pressed on {name}")
     elif action == "revive":
-        R.delete(f"{k}:killed"); event("info", f"{name} restart requested")
+        R.delete(f"{k}:killed")
+        if R.hget(f"s:{k}", "up") == "0": R.set(f"revive_at:{k}", time.time())   # start of the recovery timer
+        event("info", f"{name} restart requested")
     elif action == "spike":
         if R.get(f"{k}:spike"): R.delete(f"{k}:spike"); event("info", f"Latency spike cleared on {name}")
         else: R.set(f"{k}:spike", SPIKE_MS); event("warn", f"Latency spike injected on {name} (+{SPIKE_MS} ms)")
