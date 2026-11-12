@@ -6,6 +6,7 @@ A multi-cloud failover monitor. It health-checks two cloud providers every secon
 
 ![Sentinel dashboard](docs/dashboard.png)
 
+![Metrics and history](docs/metrics.png)
 _Dashboard after 20 scripted kill-switch tests. The red history bars and Nimbus's lower uptime are the simulated outages._
 
 ## Features
