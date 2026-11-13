@@ -75,3 +75,34 @@ def test_reset_clears_metrics_but_keeps_the_mode():
     s.R.set("mode", "live")
     assert s.app.test_client().post("/api/reset").status_code == 200
     assert s.R.get("failovers") is None and s.R.get("mode") == "live"
+
+
+def test_classify_requests():
+    assert s.classify(False, None, "a") == "failed"
+    assert s.classify(True, "a", "a") == "normal"
+    assert s.classify(True, "b", "a") == "rescued"   # Nginx retried before Sentinel switched
+    assert s.classify(True, "b", "b") == "backup"
+
+
+def test_trace_is_recorded_and_summarised():
+    s.record_trace(True, 200, "a", 40)
+    s.record_trace(True, 200, "b", 90)   # active defaults to "a", so this one was rescued
+    s.record_trace(False, 0, None, 3000)
+    d = s.app.test_client().get("/api/trace").get_json()
+    assert d["summary"]["counts"] == {"normal": 1, "rescued": 1, "backup": 0, "failed": 1}
+    assert len(d["recent"]) == 3 and d["summary"]["latency"]["rescued"]["avg"] == 90
+
+
+def test_traffic_records_a_trace_entry_per_request(monkeypatch):
+    class Resp:
+        status_code = 200
+        headers = {"X-Provider": "b"}
+    monkeypatch.setattr(s.requests, "get", lambda *a, **k: Resp())
+    s.traffic()
+    assert int(s.R.get("cls:rescued")) == 3 and s.R.llen("trace") == 3
+
+
+def test_trace_csv_export():
+    s.record_trace(True, 200, "b", 90)
+    r = s.app.test_client().get("/api/export/trace.csv")
+    assert r.status_code == 200 and "rescued" in r.get_data(as_text=True)

@@ -143,16 +143,45 @@ def route(up):
             elif active == "b": event("warn", f"Failover: traffic moved to {info('b')['label']}")
             else: event("ok", f"Failback: traffic returned to {info('a')['label']}")
 
+CLASSES = ("normal", "rescued", "backup", "failed")
+
+def classify(ok, served, active):
+    """failed = no answer. normal = served by the primary. rescued = served by the backup while Sentinel
+    still treats the primary as active (Nginx retried before Sentinel switched). backup = served by the
+    backup after Sentinel switched."""
+    if not ok: return "failed"
+    if served != "b": return "normal"
+    return "rescued" if active == "a" else "backup"
+
+def record_trace(ok, status, served, ms):
+    cls = classify(ok, served, R.get("active") or "a")
+    R.lpush("trace", json.dumps({"t": time.time(), "ok": ok, "status": status, "provider": served, "ms": ms, "cls": cls}))
+    R.ltrim("trace", 0, 499)
+    R.incr(f"cls:{cls}")
+
+def trace_summary():
+    recent = [json.loads(x) for x in R.lrange("trace", 0, -1)]
+    lat = {}
+    for c in CLASSES:
+        v = [e["ms"] for e in recent if e["cls"] == c]
+        lat[c] = {"avg": round(sum(v) / len(v)), "max": max(v)} if v else None
+    return {"counts": {c: int(R.get(f"cls:{c}") or 0) for c in CLASSES}, "latency": lat}
+
 def traffic():
     for _ in range(3):
         R.incr("req")
+        t0, ok, served, status = time.time(), False, None, 0
         try:
             x = requests.get("http://gateway/work", timeout=3)
-            if x.status_code == 200:
-                R.incr(f"served:{x.headers.get('X-Provider')}"); R.incr("seq"); continue
+            status, served = x.status_code, x.headers.get("X-Provider")
+            ok = status == 200
         except requests.RequestException:
             pass
-        R.incr("fail")
+        if ok:
+            R.incr(f"served:{served}"); R.incr("seq")
+        else:
+            R.incr("fail")
+        record_trace(ok, status, served, round((time.time() - t0) * 1000))
 
 def live_traffic(up):
     act = "a" if up["a"] else "b" if up["b"] else None
@@ -225,6 +254,16 @@ def export_events():
 def export_history():
     rows = [(iso(r["t"]), info(k)["label"], r["uptime"], r["latency"]) for k, pts in history("24h").items() for r in pts]
     return csv_response("sentinel_history.csv", ["time_utc", "provider", "uptime_pct", "avg_latency_ms"], rows)
+
+@app.route("/api/trace")
+def trace_api():
+    recent = [json.loads(x) for x in R.lrange("trace", 0, 79)]
+    return jsonify({"summary": trace_summary(), "recent": list(reversed(recent))})
+
+@app.route("/api/export/trace.csv")
+def export_trace():
+    rows = [(iso(e["t"]), e["status"], e["provider"] or "", e["ms"], e["cls"]) for e in map(json.loads, R.lrange("trace", 0, -1))]
+    return csv_response("sentinel_request_trace.csv", ["time_utc", "http_status", "served_by", "latency_ms", "class"], rows)
 
 @app.route("/api/mode/<m>", methods=["POST"])
 def set_mode(m):
