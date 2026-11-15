@@ -93,16 +93,51 @@ def test_trace_is_recorded_and_summarised():
     assert len(d["recent"]) == 3 and d["summary"]["latency"]["rescued"]["avg"] == 90
 
 
-def test_traffic_records_a_trace_entry_per_request(monkeypatch):
+def test_send_request_records_a_trace_entry(monkeypatch):
     class Resp:
         status_code = 200
         headers = {"X-Provider": "b"}
     monkeypatch.setattr(s.requests, "get", lambda *a, **k: Resp())
-    s.traffic()
-    assert int(s.R.get("cls:rescued")) == 3 and s.R.llen("trace") == 3
+    s.send_request()
+    assert int(s.R.get("cls:rescued")) == 1 and s.R.llen("trace") == 1
 
 
 def test_trace_csv_export():
     s.record_trace(True, 200, "b", 90)
     r = s.app.test_client().get("/api/export/trace.csv")
     assert r.status_code == 200 and "rescued" in r.get_data(as_text=True)
+
+
+def test_routing_change_bumps_the_epoch():
+    s.route({"a": True, "b": True})
+    first = int(s.R.get("epoch"))
+    s.route({"a": True, "b": True})            # no change
+    assert int(s.R.get("epoch")) == first
+    s.route({"a": False, "b": True})           # failover
+    assert int(s.R.get("epoch")) == first + 1
+
+
+def test_request_overlapping_a_routing_change_is_flagged(monkeypatch):
+    class Resp:
+        status_code = 200
+        headers = {"X-Provider": "b"}
+
+    def get_during_switch(*a, **k):
+        s.R.incr("epoch")                      # Sentinel switches while the request is in flight
+        return Resp()
+    monkeypatch.setattr(s.requests, "get", get_during_switch)
+    s.send_request()
+    d = s.app.test_client().get("/api/trace").get_json()
+    assert d["summary"]["mid_switch"] == 1 and d["summary"]["mid_switch_failed"] == 0
+    assert d["recent"][-1]["mid"] is True
+
+
+def test_failed_request_overlapping_a_switch_is_counted(monkeypatch):
+    def fail_during_switch(*a, **k):
+        s.R.incr("epoch")
+        raise s.requests.RequestException("down")
+    monkeypatch.setattr(s.requests, "get", fail_during_switch)
+    s.send_request()
+    summary = s.trace_summary()
+    assert summary["counts"]["failed"] == 1
+    assert summary["mid_switch"] == 1 and summary["mid_switch_failed"] == 1

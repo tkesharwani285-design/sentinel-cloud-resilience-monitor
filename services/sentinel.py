@@ -133,7 +133,7 @@ def route(up):
     active = "a" if up["a"] else "b" if up["b"] else "none"
     prev = R.get("active")
     if prev != active:
-        R.set("active", active)
+        R.set("active", active); R.incr("epoch")   # epoch counts Sentinel routing changes
         if prev:
             R.incr("failovers")
             ka = R.get(f"killed_at:{prev}")
@@ -153,11 +153,16 @@ def classify(ok, served, active):
     if served != "b": return "normal"
     return "rescued" if active == "a" else "backup"
 
-def record_trace(ok, status, served, ms):
-    cls = classify(ok, served, R.get("active") or "a")
-    R.lpush("trace", json.dumps({"t": time.time(), "ok": ok, "status": status, "provider": served, "ms": ms, "cls": cls}))
+def record_trace(ok, status, served, ms, active=None, mid_switch=False):
+    """active = the provider Sentinel treated as active when the request started."""
+    cls = classify(ok, served, active or R.get("active") or "a")
+    R.lpush("trace", json.dumps({"t": time.time(), "ok": ok, "status": status, "provider": served,
+                                 "ms": ms, "cls": cls, "mid": mid_switch}))
     R.ltrim("trace", 0, 499)
     R.incr(f"cls:{cls}")
+    if mid_switch:
+        R.incr("mid_switch")
+        if not ok: R.incr("mid_switch_failed")
 
 def trace_summary():
     recent = [json.loads(x) for x in R.lrange("trace", 0, -1)]
@@ -165,23 +170,44 @@ def trace_summary():
     for c in CLASSES:
         v = [e["ms"] for e in recent if e["cls"] == c]
         lat[c] = {"avg": round(sum(v) / len(v)), "max": max(v)} if v else None
-    return {"counts": {c: int(R.get(f"cls:{c}") or 0) for c in CLASSES}, "latency": lat}
+    return {"counts": {c: int(R.get(f"cls:{c}") or 0) for c in CLASSES}, "latency": lat,
+            "mid_switch": int(R.get("mid_switch") or 0), "mid_switch_failed": int(R.get("mid_switch_failed") or 0)}
 
-def traffic():
-    for _ in range(3):
-        R.incr("req")
-        t0, ok, served, status = time.time(), False, None, 0
+TRAFFIC_INTERVAL = 0.3   # seconds between test requests (about 3 per second)
+
+def send_request():
+    """One test request through Nginx. Runs on its own thread, independent of the health-check loop,
+    so requests land at random moments relative to health checks and routing changes."""
+    R.incr("req")
+    active0, epoch0 = R.get("active") or "a", R.get("epoch")
+    t0, ok, served, status = time.time(), False, None, 0
+    try:
+        x = requests.get("http://gateway/work", timeout=3)
+        status, served = x.status_code, x.headers.get("X-Provider")
+        ok = status == 200
+    except requests.RequestException:
+        pass
+    if ok:
+        R.incr(f"served:{served}"); R.incr("seq")
+    else:
+        R.incr("fail")
+    record_trace(ok, status, served, round((time.time() - t0) * 1000), active0, R.get("epoch") != epoch0)
+
+def traffic_loop():
+    ready = False
+    while True:
         try:
-            x = requests.get("http://gateway/work", timeout=3)
-            status, served = x.status_code, x.headers.get("X-Provider")
-            ok = status == 200
-        except requests.RequestException:
+            if mode() == "sim":
+                if not ready:   # wait for the gateway to come up before counting requests
+                    try:
+                        ready = requests.get("http://gateway/work", timeout=2).status_code == 200
+                    except requests.RequestException:
+                        pass
+                else:
+                    send_request()
+        except Exception:
             pass
-        if ok:
-            R.incr(f"served:{served}"); R.incr("seq")
-        else:
-            R.incr("fail")
-        record_trace(ok, status, served, round((time.time() - t0) * 1000))
+        time.sleep(TRAFFIC_INTERVAL)
 
 def live_traffic(up):
     act = "a" if up["a"] else "b" if up["b"] else None
@@ -199,7 +225,9 @@ def loop():
     while True:
         try:
             up = {k: check(k) for k in P}
-            route(up); live_traffic(up) if mode() == "live" else traffic(); replicate(up)
+            route(up)
+            if mode() == "live": live_traffic(up)
+            replicate(up)
         except redis.RedisError:
             pass
         time.sleep(1)
@@ -262,8 +290,8 @@ def trace_api():
 
 @app.route("/api/export/trace.csv")
 def export_trace():
-    rows = [(iso(e["t"]), e["status"], e["provider"] or "", e["ms"], e["cls"]) for e in map(json.loads, R.lrange("trace", 0, -1))]
-    return csv_response("sentinel_request_trace.csv", ["time_utc", "http_status", "served_by", "latency_ms", "class"], rows)
+    rows = [(iso(e["t"]), e["status"], e["provider"] or "", e["ms"], e["cls"], e.get("mid", False)) for e in map(json.loads, R.lrange("trace", 0, -1))]
+    return csv_response("sentinel_request_trace.csv", ["time_utc", "http_status", "served_by", "latency_ms", "class", "overlapped_switch"], rows)
 
 @app.route("/api/mode/<m>", methods=["POST"])
 def set_mode(m):
@@ -278,4 +306,5 @@ def reset():
 
 if __name__ == "__main__":
     threading.Thread(target=loop, daemon=True).start()
+    threading.Thread(target=traffic_loop, daemon=True).start()
     app.run(host="0.0.0.0", port=8000)
