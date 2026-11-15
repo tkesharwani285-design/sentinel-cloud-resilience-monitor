@@ -6,7 +6,6 @@ A multi-cloud failover monitor. It health-checks two cloud providers every secon
 
 ![Sentinel dashboard](docs/dashboard.png)
 
-![Metrics and history](docs/metrics.png)
 _Dashboard after 20 scripted kill-switch tests. The red history bars and Nimbus's lower uptime are the simulated outages._
 
 ## Features
@@ -18,7 +17,8 @@ _Dashboard after 20 scripted kill-switch tests. The red history bars and Nimbus'
 - **History charts:** 1h / 24h / 7d uptime bars and a latency graph, saved across restarts
 - **Measured failover, detection (MTTD) and recovery (restart to healthy) times** from kill-switch tests
 - **Discord alerts** for failed checks, failovers and recoveries (optional)
-- **CSV export** of the event log and 24h history
+- **Per-request tracing:** every test request through Nginx is classified (primary, rescued by an Nginx retry, backup, failed) and flagged if it overlapped a routing switch
+- **CSV export** of the event log, 24h history and request trace
 - **Redis-outage resilience:** providers keep serving traffic and keep the last known kill flag when Redis is down
 - **Recreated containers are picked up automatically:** Nginx re-resolves provider names every 2 s
 - **Automated tests** and GitHub Actions CI
@@ -114,6 +114,35 @@ Simulation mode, scripted kill-switch tests (kill the primary, wait 6 s, restart
 - Health checks run once per second and providers refresh the kill flag every 0.2 s, so timings have about 1 s resolution and vary by a few tenths of a second between runs. Earlier runs gave 0.6 s over 28 tests (before the Redis-outage fix) and 0.9 s over 17 tests (after it).
 - The success-rate traffic comes from Sentinel itself (a few requests per second), so it is a functional check, not a load test.
 
+## Request tracing
+
+In Simulation mode Sentinel sends about 3 test requests per second through Nginx on its own thread, independent of the health-check loop, so requests land at random moments relative to health checks. Each one is recorded and classified:
+
+| Class                  | Meaning                                                                                            |
+| ---------------------- | -------------------------------------------------------------------------------------------------- |
+| Served by primary      | Answered by Provider A                                                                             |
+| Rescued by Nginx retry | Hit a killed primary; Nginx retried it on the backup before Sentinel switched its routing decision |
+| Served by backup       | Answered by Provider B after Sentinel switched                                                     |
+| Failed                 | No successful answer                                                                               |
+
+A switchover epoch counter goes up at every Sentinel failover or failback. It is read at the start and end of each request, and requests where it changed are flagged as having overlapped a routing switch. The epoch tracks Sentinel's routing decision; Nginx does the actual routing.
+
+![Request trace](docs/trace_panel.png)
+
+Snapshot after 10 scripted kill/restart cycles (20 routing changes):
+
+| Result                               | Requests                |
+| ------------------------------------ | ----------------------- |
+| Served by primary                    | 514                     |
+| Rescued by an Nginx retry            | 13 (about 1.3 per kill) |
+| Served by backup                     | 147                     |
+| Failed                               | **0**                   |
+| Overlapped a Sentinel routing switch | 1 (it succeeded)        |
+
+- Rescued requests averaged 75 ms (max 97 ms), close to the 79 ms of requests served by the backup, so the retry adds little on top of the backup's own latency. Primary requests averaged 41 ms.
+- A provider checks its kill flag when a request starts, so a request already being processed when Kill is pressed completes normally. The requests that matter are the ones that start after the kill, and Nginx rescued those.
+- This is Sentinel's own test traffic at a few requests per second, so it shows behaviour during switches, not performance under load.
+
 ## Resilience testing
 
 Both problems below were found by testing and then fixed.
@@ -141,12 +170,12 @@ The cause was that Nginx looked up the provider addresses once, at startup. The 
 - **Nginx is a single instance.**
 - **Nginx tries Provider A first on every request.** It does not remember that A is down. A killed or stopped A fails instantly, but an unreachable A costs up to 1 s (the connect timeout) per request before the retry on B.
 - **State sync is simulated.** It is a counter that shows a provider catching up after recovery, not real database replication.
-- **No per-request tracing yet.** It is not possible to tell whether a failed request was already in flight when Kill was pressed or arrived during the switchover.
+- **Tracing covers Sentinel's own test traffic only.** It is about 3 requests per second in Simulation mode, so it is not a load test, and Live mode sends no requests through Nginx.
 - **Simulation mode providers are mock services,** and in Live mode the outages are still simulated.
 
 ## Tests and CI
 
-Sixteen pytest tests run on every push with GitHub Actions. Ten (`tests/test_sentinel.py`) cover the Sentinel monitor: failover and failback, total outage, failover timing, state sync, history maths, status API, CSV export, recovery-time measurement from the Restart press, the restart endpoint and the reset endpoint. Six (`tests/test_provider.py`) cover the Redis-outage behaviour: flags are cached, requests are served in under 0.5 s with Redis down, a killed provider stays killed, and a stale kill is cleared when Redis returns. They use a fake Redis, so they check logic but do not kill a real container behind Nginx.
+Twenty-three pytest tests run on every push with GitHub Actions. Seventeen (`tests/test_sentinel.py`) cover the Sentinel monitor: failover and failback, total outage, failover timing, state sync, history maths, status API, CSV export, recovery-time measurement, the restart and reset endpoints, request classification, the switchover epoch and mid-switch request tracking. Six (`tests/test_provider.py`) cover the Redis-outage behaviour: flags are cached, requests are served in under 0.5 s with Redis down, a killed provider stays killed, and a stale kill is cleared when Redis returns. They use a fake Redis, so they check logic but do not kill a real container behind Nginx.
 
 Run locally:
 
@@ -186,7 +215,7 @@ pytest -q
 ## Roadmap
 
 - End-to-end failover test through Nginx
-- Per-request tracing to separate in-flight failures from switchover failures
+- Load test during kills at much higher request rates
 - Prometheus and Grafana metrics
 - Real Redis replication instead of simulated sync
 - Circuit breaker with gradual traffic return
